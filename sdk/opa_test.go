@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -2339,4 +2340,115 @@ p { print("XXX") }
 	if e.Message != "XXX" || e.Fields["line"].(string) != "/x.rego:4" {
 		t.Fatal("expected print output but got:", e)
 	}
+}
+
+func TestPartialDecisionWithEnvironmentVariable(t *testing.T) {
+	ctx := context.Background()
+
+	policy, err := os.ReadFile("test.rego")
+	if err != nil {
+		t.Fail()
+	}
+
+	server := sdktest.MustNewServer(
+		sdktest.MockBundle("/bundles/bundle.tar.gz", map[string]string{
+			"main.rego": string(policy),
+		}),
+	)
+
+	defer server.Stop()
+
+	testBundleResource := "/bundles/bundle.tar.gz"
+
+	config := fmt.Sprintf(`{
+		"services": {
+			"test": {
+				"url": %q
+			}
+		},
+		"bundles": {
+			"test": {
+				"resource": %q
+			}
+		},
+		"env": {
+			"SAS_OAUTH_TOKEN_VERIFY_KEY" : "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3lW2ayqmx3+MI2INJlon\n4LutHYyFZ4FiicqrUtZy1qEYJzS5H8nkOn2Jj8tEf7oC+q0qMfe91hQhhcvwyqjm\njWNloui9PEkD6oeFjDVoOKplXCgMHx/YZqAXQZL9IlRyqqp2v63tH3QdLaotIwnj\nzeLOAfAeLLbxKeciQ/nB9kMZRGRAkt6qLrTU7nJ9tIOGuyjtOePSPkcuI0IDqNf5\nf4vqUGbgJlv5x3BrplYhx8mJLEg3wjDXaoY5H7mP7EYXEUPlh/TeZL3RTJzd9BMO\nvFtpSSZbmfZ3tra6l1B8gIMDR+wr9aCYRwWJPUGEYCd6ebOKgsNok02oKhXsLpzp\njQIDAQAB\n-----END PUBLIC KEY-----"
+		}
+	}`, server.URL(), testBundleResource)
+	fmt.Println(config)
+
+	opa, err := sdk.New(ctx, sdk.Options{
+		Config: strings.NewReader(config),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer opa.Stop(ctx)
+
+	exp := true
+
+	input := map[string]interface{}{}
+	input["token"] = "eyJhbGciOiJSUzI1NiIsImprdSI6Imh0dHBzOi8vbG9jYWxob3N0L1NBU0xvZ29uL3Rva2VuX2tleXMiLCJraWQiOiJsZWdhY3ktdG9rZW4ta2V5IiwidHlwIjoiSldUIn0.eyJqdGkiOiI1NGEyNzczOTljMmY0NjQ1OGJjNWM1NmY5YzhlMzFiOCIsImF1dGhvcml0aWVzIjpbInVuaXhfciZkIl0sImV4dF9pZCI6ImNuPVdvcmtmbG93IFVzZXIgMSxvdT1HZW5lcmljIGFuZCBTaGFyZWQgQWNjb3VudHMsb3U9QWRtaW4sZGM9bmEsZGM9U0FTLGRjPWNvbSIsInN1YiI6Ijc2MmI2M2FkLTUwMDItNDA3My04MzE5LTg2OTMyNTg1ZDQyYyIsInNjb3BlIjpbIm9wZW5pZCIsInVhYS51c2VyIl0sImNsaWVudF9pZCI6InNhcy5lYyIsImNpZCI6InNhcy5lYyIsImF6cCI6InNhcy5lYyIsImdyYW50X3R5cGUiOiJwYXNzd29yZCIsInVzZXJfaWQiOiI3NjJiNjNhZC01MDAyLTQwNzMtODMxOS04NjkzMjU4NWQ0MmMiLCJvcmlnaW4iOiJsZGFwIiwidXNlcl9uYW1lIjoid2Z1c2VyMSIsImVtYWlsIjoid2Z1c2VyMUB1c2VyLmZyb20ubGRhcC5jZiIsImF1dGhfdGltZSI6MTcwMDE3OTk3NCwicmV2X3NpZyI6IjE2ZDg2ODU4IiwiaWF0IjoxNzAwMTc5OTc0LCJleHAiOjE3MDAxODM1NzQsImlzcyI6Imh0dHA6Ly9sb2NhbGhvc3QvU0FTTG9nb24vb2F1dGgvdG9rZW4iLCJ6aWQiOiJ1YWEiLCJhdWQiOlsidWFhIiwib3BlbmlkIiwic2FzLmVjIl19.ThPZLVINo5094XEiueiCD_Kt0tI6BDzZHdZ2Smz8KgAA07rIxG4mIdtehEiLMR5wJzjYh0eIL66DIBTMVBCqkdXGYNvVo5IGHDzFpjVGurnrpa-ANlY5Y4Epml03cF9edmILP4K1UpIfmGFL1Fxz1HfNkKXoq5KalJQTGAVi3Q_ArJ4pIkjz85NMdqE8NFoh6jBjI8bvlpgTthYftLA_jaDF6tpJPWuO_eTyWTL562hVkIErqSCyBp_BnBs-XxfWqvlqe5fTslumWDlBSkAN3Kbf_VBKWpzEJ25tOxwz_swODG6QJOdL1vH35-agKkNg9Q7qLzN_beaXMuSmKMZJxw"
+	input["request"] = map[string]interface{}{
+		"uri":        "/types/",
+		"permission": "read",
+	}
+
+	if result, err := opa.Decision(ctx, sdk.DecisionOptions{Path: "/sas/types/authz/allow", Input: input}); err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(result.Result, exp) {
+		t.Fatalf("expected %v but got %v", exp, result.Result)
+	}
+
+	if presult, err := opa.Partial(ctx, sdk.PartialOptions{Query: "data.sas.types.authz.allow = true", Input: input, Mapper: &partialQueryMapper{}}); err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(presult.Result, exp) {
+		t.Fatalf("expected %v but got %v", exp, presult.Result)
+	}
+}
+
+type partialQueryMapper struct {
+}
+
+func (pqm *partialQueryMapper) MapResults(pq *rego.PartialQueries) (interface{}, error) {
+	// TODO: Verify logic
+	// The statements made in the following links seem inconsistent with the behavior seen in OPA.
+	// https://www.openpolicyagent.org/docs/latest/rest-api/#partially-evaluate-a-query
+	// https://blog.openpolicyagent.org/write-policy-in-opa-enforce-policy-in-sql-d9d24db93bf4
+	//
+	// Statement:
+	// 	In some cases, OPA can still determine that a request should be allowed or denied unconditionally.
+	// 	In these cases, OPA returns a single empty query or no queries at all (respectively.)
+	//
+	// A discussion topic has been created with the OPA community to seek clarity.
+	// https://github.com/orgs/open-policy-agent/discussions/380#discussioncomment-5467890
+	//
+	// Until a response has been received to the topic the logic here has been implemented such that
+	// if no queries are returned or any query is empty we will assume that the request should be allowed
+	// or denied unconditionally.
+
+	if len(pq.Queries) == 0 {
+		return true, nil
+	}
+
+	hasEmptyQuery := false
+	for _, q := range pq.Queries {
+		if q == nil || q.String() == "" {
+			hasEmptyQuery = true
+			break
+		}
+	}
+
+	if hasEmptyQuery {
+		return true, nil
+	}
+
+	// TODO: handle other cases
+
+	return false, nil
+}
+
+func (pqm *partialQueryMapper) ResultToJSON(result interface{}) (interface{}, error) {
+	return json.Marshal(result)
 }
